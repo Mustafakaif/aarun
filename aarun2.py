@@ -19,25 +19,38 @@ def normalize(img):
 
 # Align images
 def align_images(nir, red):
-    orb = cv2.ORB_create(500)
-    kp1, des1 = orb.detectAndCompute(nir, None)
-    kp2, des2 = orb.detectAndCompute(red, None)
+    nir_u8 = nir.astype(np.uint8)
+    red_u8 = red.astype(np.uint8)
+
+    orb = cv2.ORB_create(1000)
+
+    kp1, des1 = orb.detectAndCompute(nir_u8, None)
+    kp2, des2 = orb.detectAndCompute(red_u8, None)
 
     if des1 is None or des2 is None:
+        st.warning("Alignment failed: not enough common features. Continuing without alignment.")
         return red
 
     matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
     matches = matcher.match(des1, des2)
-    matches = sorted(matches, key=lambda x: x.distance)
 
-    pts1 = np.float32([kp1[m.queryIdx].pt for m in matches[:20]]).reshape(-1,1,2)
-    pts2 = np.float32([kp2[m.trainIdx].pt for m in matches[:20]]).reshape(-1,1,2)
+    if len(matches) < 10:
+        st.warning("Alignment failed: too few matching points. Continuing without alignment.")
+        return red
+
+    matches = sorted(matches, key=lambda x: x.distance)[:50]
+
+    pts1 = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1,1,2)
+    pts2 = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1,1,2)
 
     H, _ = cv2.findHomography(pts2, pts1, cv2.RANSAC, 5.0)
 
+    if H is None:
+        st.warning("Homography failed. Continuing without alignment.")
+        return red
+
     aligned = cv2.warpPerspective(red, H, (nir.shape[1], nir.shape[0]))
     return aligned
-
 # Leaf mask
 def mask_leaf(img):
     blur = cv2.GaussianBlur(img, (5,5), 0)
