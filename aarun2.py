@@ -3,7 +3,7 @@ import cv2
 import numpy as np
 from PIL import Image
 import pandas as pd
-
+import matplotlib.pyplot as plt
 st.set_page_config(layout="wide")
 st.title("AETOS NDRE Engine V3")
 
@@ -155,3 +155,15 @@ if nir_file and red_file:
 
     csv = df.to_csv(index=False).encode("utf-8")
     st.download_button("Download CSV", csv, "ndre_results.csv")
+   
+
+    st.subheader("NDRE Colored Map")
+
+    fig, ax = plt.subplots()
+
+    cax = ax.imshow(ndre, cmap='RdYlGn', vmin=-0.2, vmax=0.6)
+    ax.axis('off')
+
+    fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+
+    st.pyplot(fig)
