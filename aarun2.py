@@ -19,39 +19,53 @@ def normalize(img):
 
 # Align images
 def align_images(nir, red):
-    nir_u8 = nir.astype(np.uint8)
-    red_u8 = red.astype(np.uint8)
+    try:
+        # Convert normalized float images to float32
+        nir_f = nir.astype(np.float32)
+        red_f = red.astype(np.float32)
 
-    orb = cv2.ORB_create(1000)
+        # ECC needs same size
+        if nir_f.shape != red_f.shape:
+            red_f = cv2.resize(red_f, (nir_f.shape[1], nir_f.shape[0]))
 
-    kp1, des1 = orb.detectAndCompute(nir_u8, None)
-    kp2, des2 = orb.detectAndCompute(red_u8, None)
+        # Motion model: translation + rotation + scale
+        warp_mode = cv2.MOTION_EUCLIDEAN
 
-    if des1 is None or des2 is None:
-        st.warning("Alignment failed: not enough common features. Continuing without alignment.")
-        return red
+        # Initial warp matrix
+        warp_matrix = np.eye(2, 3, dtype=np.float32)
 
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
-    matches = matcher.match(des1, des2)
+        # ECC stopping criteria
+        criteria = (
+            cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
+            5000,
+            1e-7
+        )
 
-    if len(matches) < 10:
-        st.warning("Alignment failed: too few matching points. Continuing without alignment.")
-        return red
+        # Find alignment
+        cc, warp_matrix = cv2.findTransformECC(
+            nir_f,
+            red_f,
+            warp_matrix,
+            warp_mode,
+            criteria,
+            None,
+            5
+        )
 
-    matches = sorted(matches, key=lambda x: x.distance)[:50]
+        # Apply alignment
+        aligned_red = cv2.warpAffine(
+            red_f,
+            warp_matrix,
+            (nir_f.shape[1], nir_f.shape[0]),
+            flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP
+        )
 
-    pts1 = np.float32([kp1[m.queryIdx].pt for m in matches]).reshape(-1,1,2)
-    pts2 = np.float32([kp2[m.trainIdx].pt for m in matches]).reshape(-1,1,2)
+        st.success(f"ECC alignment successful. Correlation score: {cc:.4f}")
+        return aligned_red
 
-    H, _ = cv2.findHomography(pts2, pts1, cv2.RANSAC, 5.0)
-
-    if H is None:
-        st.warning("Homography failed. Continuing without alignment.")
-        return red
-
-    aligned = cv2.warpPerspective(red, H, (nir.shape[1], nir.shape[0]))
-    return aligned
-# Leaf mask
+    except Exception as e:
+        st.warning(f"ECC alignment failed. Continuing without alignment. Error: {e}")
+        return red# Leaf mask
 def mask_leaf(img):
     blur = cv2.GaussianBlur(img, (5,5), 0)
     _, thresh = cv2.threshold((blur*255).astype(np.uint8), 0, 255, cv2.THRESH_OTSU)
