@@ -65,12 +65,34 @@ def align_images(nir, red):
 
     except Exception as e:
         st.warning(f"ECC alignment failed. Continuing without alignment. Error: {e}")
-        return red# Leaf mask
+        return red
+        # Leaf mask
 def mask_leaf(img):
-    blur = cv2.GaussianBlur(img, (5,5), 0)
-    _, thresh = cv2.threshold((blur*255).astype(np.uint8), 0, 255, cv2.THRESH_OTSU)
-    return thresh == 0
+    img8 = (img * 255).astype(np.uint8)
 
+    blur = cv2.GaussianBlur(img8, (7, 7), 0)
+
+    # Leaf is darker than background in your images
+    _, mask = cv2.threshold(
+        blur, 0, 255,
+        cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
+    )
+
+    # Remove noise
+    kernel = np.ones((7, 7), np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+    # Keep only largest object = leaf
+    num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
+
+    if num_labels <= 1:
+        return mask > 0
+
+    largest_label = 1 + np.argmax(stats[1:, cv2.CC_STAT_AREA])
+    clean_mask = labels == largest_label
+
+    return clean_mask
 # NDRE calculation
 def compute_ndre(nir, red):
     return (nir - red) / (nir + red + 1e-6)
