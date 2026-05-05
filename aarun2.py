@@ -4,59 +4,53 @@ import numpy as np
 from PIL import Image
 import pandas as pd
 import matplotlib.pyplot as plt
-st.set_page_config(layout="wide")
-st.title("AETOS NDRE Engine V3")
 
-# Load image
+st.set_page_config(layout="wide")
+st.title("AETOS NDRE Image Generator V4")
+
 def load_image(file):
     img = Image.open(file).convert("L")
     return np.array(img)
 
-# Normalize DN
 def normalize(img):
     img = img.astype(np.float32)
     return (img - np.min(img)) / (np.max(img) - np.min(img) + 1e-6)
 
-# Align images
-def align_images(nir, red):
+def align_images_ecc(nir, red):
     try:
-        # Convert normalized float images to float32
-        nir_f = nir.astype(np.float32)
-        red_f = red.astype(np.float32)
+        if nir.shape != red.shape:
+            red = cv2.resize(red, (nir.shape[1], nir.shape[0]))
 
-        # ECC needs same size
-        if nir_f.shape != red_f.shape:
-            red_f = cv2.resize(red_f, (nir_f.shape[1], nir_f.shape[0]))
+        # resize for faster ECC
+        scale = 0.5
+        nir_small = cv2.resize(nir, None, fx=scale, fy=scale)
+        red_small = cv2.resize(red, None, fx=scale, fy=scale)
 
-        # Motion model: translation + rotation + scale
-        warp_mode = cv2.MOTION_EUCLIDEAN
-
-        # Initial warp matrix
         warp_matrix = np.eye(2, 3, dtype=np.float32)
-
-        # ECC stopping criteria
         criteria = (
             cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT,
-            5000,
-            1e-7
+            1000,
+            1e-6
         )
 
-        # Find alignment
         cc, warp_matrix = cv2.findTransformECC(
-            nir_f,
-            red_f,
+            nir_small.astype(np.float32),
+            red_small.astype(np.float32),
             warp_matrix,
-            warp_mode,
+            cv2.MOTION_EUCLIDEAN,
             criteria,
             None,
             5
         )
 
-        # Apply alignment
+        # scale warp back to original size
+        warp_matrix[0, 2] /= scale
+        warp_matrix[1, 2] /= scale
+
         aligned_red = cv2.warpAffine(
-            red_f,
+            red.astype(np.float32),
             warp_matrix,
-            (nir_f.shape[1], nir_f.shape[0]),
+            (nir.shape[1], nir.shape[0]),
             flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP
         )
 
@@ -66,24 +60,23 @@ def align_images(nir, red):
     except Exception as e:
         st.warning(f"ECC alignment failed. Continuing without alignment. Error: {e}")
         return red
-        # Leaf mask
-def mask_leaf(img):
-    img8 = (img * 255).astype(np.uint8)
+
+def mask_leaf(nir_norm):
+    img8 = (nir_norm * 255).astype(np.uint8)
 
     blur = cv2.GaussianBlur(img8, (7, 7), 0)
 
-    # Leaf is darker than background in your images
     _, mask = cv2.threshold(
-        blur, 0, 255,
+        blur,
+        0,
+        255,
         cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU
     )
 
-    # Remove noise
     kernel = np.ones((7, 7), np.uint8)
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
 
-    # Keep only largest object = leaf
     num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
 
     if num_labels <= 1:
@@ -93,11 +86,10 @@ def mask_leaf(img):
     clean_mask = labels == largest_label
 
     return clean_mask
-# NDRE calculation
+
 def compute_ndre(nir, red):
     return (nir - red) / (nir + red + 1e-6)
 
-# Upload
 nir_file = st.file_uploader("Upload NIR Image")
 red_file = st.file_uploader("Upload Red Edge Image")
 
@@ -107,63 +99,66 @@ if nir_file and red_file:
     red = load_image(red_file)
 
     st.subheader("Original Images")
-    col1, col2 = st.columns(2)
-    col1.image(nir, caption="NIR", use_container_width=True)
-    col2.image(red, caption="Red Edge", use_container_width=True)
+    c1, c2 = st.columns(2)
+    c1.image(nir, caption="NIR Image", use_container_width=True)
+    c2.image(red, caption="Red Edge Image", use_container_width=True)
 
-    # Normalize
     nir_norm = normalize(nir)
     red_norm = normalize(red)
 
-    # Align
-    red_aligned = align_images(nir_norm, red_norm)
+    red_aligned = align_images_ecc(nir_norm, red_norm)
 
-    st.subheader("Aligned Images")
-    col3, col4 = st.columns(2)
-    col3.image(nir_norm, caption="Normalized NIR", use_container_width=True)
-    col4.image(red_aligned, caption="Aligned Red Edge", use_container_width=True)
-
-    # Mask
     mask = mask_leaf(nir_norm)
 
-    # NDRE
+    st.subheader("Detected Leaf Mask")
+    st.image((mask.astype(np.uint8) * 255), caption="White = Leaf Area", use_container_width=True)
+
     ndre = compute_ndre(nir_norm, red_aligned)
-    ndre_masked = ndre[mask]
 
-    # Metrics
-    mean_ndre = float(np.mean(ndre_masked))
-    min_ndre = float(np.min(ndre_masked))
-    max_ndre = float(np.max(ndre_masked))
+    ndre_leaf_only = np.full_like(ndre, np.nan)
+    ndre_leaf_only[mask] = ndre[mask]
 
-    st.subheader("NDRE Heatmap")
-    st.image(ndre, clamp=True)
+    valid_ndre = ndre[mask]
+    valid_nir = nir[mask]
+    valid_red = red[mask]
+
+    mean_ndre = float(np.nanmean(valid_ndre))
+    median_ndre = float(np.nanmedian(valid_ndre))
+    min_ndre = float(np.nanmin(valid_ndre))
+    max_ndre = float(np.nanmax(valid_ndre))
+
+    mean_nir_dn = float(np.mean(valid_nir))
+    mean_red_dn = float(np.mean(valid_red))
+
+    st.subheader("Cropler-like NDRE Colored Image")
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+    cmap = plt.cm.RdYlGn
+    cax = ax.imshow(ndre_leaf_only, cmap=cmap, vmin=-0.2, vmax=0.6)
+    ax.axis("off")
+    fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04, label="NDRE")
+    st.pyplot(fig)
 
     st.subheader("NDRE Metrics")
-    st.write({
-        "Mean NDRE": mean_ndre,
-        "Min NDRE": min_ndre,
-        "Max NDRE": max_ndre,
-        "Leaf Pixels": int(np.sum(mask))
-    })
 
-    df = pd.DataFrame([{
-        "Mean NDRE": mean_ndre,
-        "Min NDRE": min_ndre,
-        "Max NDRE": max_ndre,
+    result = {
+        "Mean NDRE": round(mean_ndre, 4),
+        "Median NDRE": round(median_ndre, 4),
+        "Min NDRE": round(min_ndre, 4),
+        "Max NDRE": round(max_ndre, 4),
+        "Mean NIR DN": round(mean_nir_dn, 2),
+        "Mean Red Edge DN": round(mean_red_dn, 2),
         "Leaf Pixels": int(np.sum(mask))
-    }])
+    }
 
+    st.write(result)
+
+    df = pd.DataFrame([result])
     csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("Download CSV", csv, "ndre_results.csv")
-   
 
-    st.subheader("NDRE Colored Map")
-
-    fig, ax = plt.subplots()
-
-    cax = ax.imshow(ndre, cmap='RdYlGn', vmin=-0.2, vmax=0.6)
-    ax.axis('off')
-
-    fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
-
-    st.pyplot(fig)
+    st.download_button(
+        "Download CSV",
+        csv,
+        "ndre_results.csv",
+        "text/csv"
+    )
