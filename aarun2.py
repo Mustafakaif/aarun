@@ -117,9 +117,36 @@ if nir_file and red_file:
 
     mask = mask_leaf(nir_norm)
 
-    st.subheader("Detected Leaf Mask")
-    st.image((mask.astype(np.uint8) * 255), caption="White = Leaf Area", use_container_width=True)
-
+    st.subheader("NDRE Colored Map with Scale")
+    
+    ndre_display = np.full_like(ndre, np.nan)
+    ndre_display[mask] = ndre[mask]
+    
+    fig, ax = plt.subplots(figsize=(10, 7))
+    
+    cax = ax.imshow(
+        ndre_display,
+        cmap="RdYlGn",
+        vmin=-0.2,
+        vmax=0.6
+    )
+    
+    ax.axis("off")
+    
+    cbar = fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("NDRE Scale")
+    
+    cbar.set_ticks([-0.2, 0.0, 0.15, 0.30, 0.45, 0.60])
+    cbar.set_ticklabels([
+        "Very Low\n-0.2",
+        "Low\n0.0",
+        "Stress\n0.15",
+        "Moderate\n0.30",
+        "Good\n0.45",
+        "High\n0.60"
+    ])
+    
+    st.pyplot(fig)
     ndre = compute_ndre(nir_norm, red_aligned)
     valid_ndre = ndre[mask]
 
