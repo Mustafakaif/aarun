@@ -6,7 +6,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 st.set_page_config(layout="wide")
-st.title("AETOS NDRE Engine V5 - Overlay + Stress Zones")
+st.title("AETOS NDRE Engine V5 - Overlay + NDRE Scale")
 
 def load_gray(file):
     img = Image.open(file).convert("L")
@@ -116,47 +116,23 @@ if nir_file and red_file:
     red_aligned = align_images_ecc(nir_norm, red_norm)
 
     mask = mask_leaf(nir_norm)
-  ndre = compute_ndre(nir_norm, red_aligned)
-    st.subheader("NDRE Colored Map with Scale")
-    
-    ndre_display = np.full_like(ndre, np.nan)
-    ndre_display[mask] = ndre[mask]
-    
-    fig, ax = plt.subplots(figsize=(10, 7))
-    
-    cax = ax.imshow(
-        ndre_display,
-        cmap="RdYlGn",
-        vmin=-0.2,
-        vmax=0.6
-    )
-    
-    ax.axis("off")
-    
-    cbar = fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("NDRE Scale")
-    
-    cbar.set_ticks([-0.2, 0.0, 0.15, 0.30, 0.45, 0.60])
-    cbar.set_ticklabels([
-        "Very Low\n-0.2",
-        "Low\n0.0",
-        "Stress\n0.15",
-        "Moderate\n0.30",
-        "Good\n0.45",
-        "High\n0.60"
-    ])
-    
-    st.pyplot(fig)
-  
+
+    st.subheader("Detected Leaf Mask")
+    st.image((mask.astype(np.uint8) * 255), caption="White = Leaf Area", use_container_width=True)
+
+    ndre = compute_ndre(nir_norm, red_aligned)
+
     valid_ndre = ndre[mask]
+    valid_nir = nir_raw[mask]
+    valid_red = red_raw[mask]
 
     mean_ndre = float(np.mean(valid_ndre))
     median_ndre = float(np.median(valid_ndre))
     min_ndre = float(np.min(valid_ndre))
     max_ndre = float(np.max(valid_ndre))
 
-    mean_nir_dn = float(np.mean(nir_raw[mask]))
-    mean_red_dn = float(np.mean(red_raw[mask]))
+    mean_nir_dn = float(np.mean(valid_nir))
+    mean_red_dn = float(np.mean(valid_red))
 
     stress_pixels = np.sum((ndre < 0.15) & mask)
     moderate_pixels = np.sum((ndre >= 0.15) & (ndre < 0.30) & mask)
@@ -171,8 +147,36 @@ if nir_file and red_file:
     ndre_color = create_ndre_color_map(ndre, mask)
     overlay = create_overlay(nir_raw, ndre_color, mask)
 
-    st.subheader("NDRE Colored Map")
-    st.image(cv2.cvtColor(ndre_color, cv2.COLOR_BGR2RGB), use_container_width=True)
+    st.subheader("NDRE Colored Map with Scale")
+
+    ndre_display = np.full_like(ndre, np.nan)
+    ndre_display[mask] = ndre[mask]
+
+    fig, ax = plt.subplots(figsize=(10, 7))
+
+    cax = ax.imshow(
+        ndre_display,
+        cmap="RdYlGn",
+        vmin=-0.2,
+        vmax=0.6
+    )
+
+    ax.axis("off")
+
+    cbar = fig.colorbar(cax, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label("NDRE Scale")
+
+    cbar.set_ticks([-0.2, 0.0, 0.15, 0.30, 0.45, 0.60])
+    cbar.set_ticklabels([
+        "Very Low\n-0.2",
+        "Low\n0.0",
+        "Stress\n0.15",
+        "Moderate\n0.30",
+        "Good\n0.45",
+        "High\n0.60"
+    ])
+
+    st.pyplot(fig)
 
     st.subheader("NDRE Overlay on Original Image")
     st.image(cv2.cvtColor(overlay, cv2.COLOR_BGR2RGB), use_container_width=True)
