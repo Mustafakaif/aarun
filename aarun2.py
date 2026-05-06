@@ -116,7 +116,7 @@ if nir_file and red_file:
     red_aligned = align_images_ecc(nir_norm, red_norm)
 
     mask = mask_leaf(nir_norm)
-
+  ndre = compute_ndre(nir_norm, red_aligned)
     st.subheader("NDRE Colored Map with Scale")
     
     ndre_display = np.full_like(ndre, np.nan)
@@ -147,7 +147,7 @@ if nir_file and red_file:
     ])
     
     st.pyplot(fig)
-    ndre = compute_ndre(nir_norm, red_aligned)
+  
     valid_ndre = ndre[mask]
 
     mean_ndre = float(np.mean(valid_ndre))
